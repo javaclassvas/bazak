@@ -81,6 +81,17 @@ export function caseChecks(c: GoldenCase, turn: Turn, catalog: Product[]): Check
     out.push({ name: 'covers every intent', pass: missing.length === 0, detail: missing.join(' ') });
   }
   if (e.asksQuestion) out.push({ name: 'asks a question', pass: /[?？]/.test(turn.text) });
+  if (e.minCards) out.push({ name: `shows ≥ ${e.minCards} cards`, pass: shown.length >= e.minCards, detail: `${shown.length} shown` });
+  if (e.exactShown != null) out.push({ name: `shows exactly ${e.exactShown}`, pass: shown.length === e.exactShown, detail: `${shown.length} shown` });
+  if (e.textMatches) out.push({ name: `text matches ${e.textMatches}`, pass: e.textMatches.test(turn.text) });
+  if (e.noPricesInText) {
+    const amounts = moneyAmounts(turn.text);
+    out.push({ name: 'no prices in text', pass: amounts.length === 0, detail: amounts.join(' ') });
+  }
+  if (e.namesNoProducts) {
+    const named = catalog.filter((p) => p.title.length > 6 && turn.text.toLowerCase().includes(p.title.toLowerCase()));
+    out.push({ name: 'names no catalog product', pass: named.length === 0, detail: named.map((p) => p.title).join('; ') });
+  }
 
   return out;
 }

@@ -12,7 +12,9 @@
     "test": "vitest run",
     "eval": "tsx evals/run.ts",
     "test:contract": "CONTRACT=1 vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "check": "tsc --noEmit && eslint src tests e2e evals scripts && vitest run && playwright test && CONTRACT=1 vitest run",
+    "eval:calibrate": "tsx evals/calibrate.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.122",

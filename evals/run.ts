@@ -18,6 +18,7 @@ import type { Product } from '../src/lib/catalog/types';
 import { caseChecks, invariantChecks, type CheckResult } from './checks';
 import { GOLDEN } from './golden';
 import { runTurn } from './harness';
+import { judgeRelevance, RELEVANCE_THRESHOLD } from './judge';
 
 process.loadEnvFile('.env.local');
 
@@ -30,7 +31,15 @@ const effort = value('effort') as ReasoningEffort | undefined;
 const modelId = process.env.OPENAI_MODEL ?? 'gpt-6-luna';
 const model = openai(modelId);
 const products: Product[] = JSON.parse(readFileSync('evals/fixture/catalog.json', 'utf8')).products;
-const catalog = createCatalogClient({ baseUrl: 'http://fixture.local', fetch: createFixtureFetch(products) });
+const liveFixtureCatalog = createCatalogClient({ baseUrl: 'http://fixture.local', fetch: createFixtureFetch(products) });
+const deadCatalog = createCatalogClient({
+  baseUrl: 'http://down.local',
+  retries: 0,
+  fetch: async () => {
+    throw new TypeError('fetch failed');
+  },
+});
+const judge = args.includes('--judge');
 
 type RunRecord = {
   caseId: string;
@@ -41,10 +50,12 @@ type RunRecord = {
   searches: unknown[];
   groups: { title: string | null; ids: number[] }[];
   timing: unknown;
+  relevance?: number[];
   error?: string;
 };
 
 async function runCase(c: (typeof GOLDEN)[number], run: number): Promise<RunRecord> {
+  const catalog = c.catalogDown ? deadCatalog : liveFixtureCatalog;
   try {
     let history: CopilotUIMessage[] = [];
     for (const earlier of c.setup ?? []) {
@@ -56,6 +67,19 @@ async function runCase(c: (typeof GOLDEN)[number], run: number): Promise<RunReco
       ...caseChecks(c, turn, products),
       ...invariantChecks(turn, products, [...(c.setup ?? []), c.query]),
     ];
+    let relevance: number[] | undefined;
+    const shown = turn.groups.flatMap((g) => g.products);
+    if (judge && shown.length > 0) {
+      relevance = await judgeRelevance([...(c.setup ?? []), c.query], shown);
+      const low = shown.filter((_, i) => relevance![i] < RELEVANCE_THRESHOLD);
+      // Reported, not gating: the judge is the same model family as the system under test.
+      checks.push({
+        name: `judge: every card relevant (p ≥ ${RELEVANCE_THRESHOLD})`,
+        pass: low.length === 0,
+        warn: true,
+        detail: low.map((p) => `#${p.id} ${p.title} p=${relevance![shown.indexOf(p)].toFixed(2)}`).join('; '),
+      });
+    }
     return {
       caseId: c.id,
       run,
@@ -65,6 +89,7 @@ async function runCase(c: (typeof GOLDEN)[number], run: number): Promise<RunReco
       searches: turn.searches,
       groups: turn.groups.map((g) => ({ title: g.title, ids: g.products.map((p) => p.id) })),
       timing: turn.timing,
+      relevance,
     };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -102,6 +127,13 @@ async function main() {
     }
   }
   console.log(`\n${passedCases}/${cases.length} cases passed`);
+  const ok = records.filter((r) => r.timing) as (RunRecord & { timing: { cardsMs: number | null; totalMs: number } })[];
+  const median = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : null);
+  console.log(`runs: ${records.filter((r) => r.pass).length}/${records.length} passed · median to cards ${median(ok.flatMap((r) => (r.timing.cardsMs == null ? [] : [r.timing.cardsMs])))} ms · median total ${median(ok.map((r) => r.timing.totalMs))} ms`);
+  const probs = records.flatMap((r) => r.relevance ?? []);
+  if (probs.length) {
+    console.log(`judge: ${probs.length} cards, mean relevance ${(probs.reduce((a, b) => a + b, 0) / probs.length).toFixed(3)}, below ${RELEVANCE_THRESHOLD}: ${probs.filter((p) => p < RELEVANCE_THRESHOLD).length}`);
+  }
 
   mkdirSync('evals/out', { recursive: true });
   const file = `evals/out/${new Date().toISOString().replace(/[:.]/g, '-')}.json`;

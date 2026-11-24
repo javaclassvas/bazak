@@ -196,3 +196,35 @@ Decided: a stored conversation shows the cards as they were when shown, not re-r
 - **`busy` is reachable by a real user:** in the two-tab e2e scenario the cards appear before the reply ends, and sending from the other tab at that moment answers 409 `busy`. The chat shows "A reply is still being generated" with Retry.
 - Both disk-full paths are now covered by integration tests (user message → 507 and no model call; assistant message → reply still streams, loss is logged).
 - `MOCK_LLM=1` also serves as a way to click through the app without an API key.
+
+## Stage 6 findings (2026-11-24)
+
+### D13. What gates a submission
+`npm run check`: type-check, lint, the fast suite, e2e, and the live-API contract test.
+- **Evals are not in the gate.** They are non-deterministic and spend API budget. They are run on purpose and their results are published, not used as a pass/fail condition.
+
+### F14. Full eval: 25 cases × 3 runs
+Cases cover direct, budget, ranking, off-catalog (incl. a plausible missing category and a mixed request), ambiguous, multi-intent (2 and 3 things), multi-turn, small talk, Russian, a typo, a prompt-injection attempt and a dead catalog.
+
+| Run | Effort | Runs passed | Median to cards | Median total |
+|---|---|---|---|---|
+| A (before prompt fix) | low | 74/75 | 2878 ms | 4060 ms |
+| B (after prompt fix) | low | 73/75 | 3018 ms | 4061 ms |
+| C (after prompt fix) | none | 75/75 | 3710 ms | 5214 ms |
+
+Failures, each seen once in three runs of its case:
+- **Run A, "wireless earphones": the text said "I found these wireless earphones:" and no cards were shown.** The model searched, then answered without calling `show_products`. A real defect: the reply promises something the UI does not contain. Fix: an instruction to call `show_products` before writing and never to announce results that are not shown. Not seen again in runs B and C (6 runs of that case) — which is weak evidence, not proof.
+- **Run B, "something cheap and cool": one group instead of two or more.** A deviation from D7, one run in three.
+- **Run B, "cheaper ones": two phones shown, check wanted three.** The model picked a $200 ceiling, which leaves two phones. The answer was right and the check was wrong; `minShown` for that case is now 1. An eval that fails correct answers teaches you to ignore it.
+
+Not a single run produced an ungrounded price in text, a card that differs from the catalog, cards for an off-catalog request, or a product named while the catalog was down.
+
+- **Effort: these runs do not separate `none` from `low`.** 75/75 vs 73/75 with one of the two failures being a check bug; `none` was slower here and faster in stage 1. With this sample size both differences are noise. **Open:** final effort level. No evidence to move off `low`.
+
+### F15. The relevance judge needed a second version before it measured anything
+Judge: Decisions API, one Boolean question per shown card, answer is P(relevant) (`evals/judge.ts`). Reported as a warning, never as a gate.
+- **V1 scored each card against the whole request.** A laptop shown for "a laptop, a men's watch and sunglasses" got 0.34–0.49; a perfume shown for "exactly two fragrances" got 0.03; the top-rated skin-care product got 0.38 for "which has the best rating". 41 of 247 cards fell below 0.5 while the oracle checks passed.
+- **V2** tells the judge it is looking at one card of several, that matching one of several requested things is enough, and that constraints on the set (count, cheapest, best) are not its job. On the 32 calibration pairs V1 called 11 relevant and V2 calls 21; pairs the judge is unsure about (0.2–0.8) dropped from 17 to 9.
+- **V2 is still questionable** in places I would not sign off on myself: "matching shoes" for a dress score 0.06–0.30, and an Apple HomePod scores 0.23 for "What do you have from Apple?".
+- **Open — calibration.** `evals/calibration/pairs.json` has 32 request–product pairs with `"relevant": null`. Once they are labelled by hand, `npm run eval:calibrate` reports agreement and lists every disagreement. Until then the judge's numbers are unvalidated and must not be quoted as quality.
+- The judge is the same model family as the system it judges. Agreement with human labels is the only thing that makes it evidence.
