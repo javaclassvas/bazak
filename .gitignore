@@ -47,3 +47,9 @@ next-env.d.ts
 /evals/out/
 /test-results/
 /playwright-report/
+
+# local assistant tooling
+/.claude/
+
+# private working notes for writing the README
+/docs/readme-notes.md

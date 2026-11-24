@@ -85,7 +85,7 @@ Only ids returned by a search in this conversation can be shown: the current req
 | 3 × each | 30/30 on gating checks; the allowlist fired once |
 
 - **The allowlist caught a real hallucinated id.** In one of three runs of "phones under $300" the model asked to show id 126, which the search had not returned. The server dropped it; the four cards shown were correct. `no dropped ids` is therefore a *warning*, not a gate: the guard is the product behaviour, and how often it fires is a metric.
-- **Open:** whether a dropped id should stay a warning or fail the case.
+- **Decided:** a dropped id stays a warning. The guard worked and the user saw a correct result; failing the case would punish the system for the behaviour we built it to have.
 
 ### F6. First mutation: removing the price filter
 Deleting the `maxPrice` filter from `refine`:
@@ -96,7 +96,7 @@ The model masks retrieval bugs. Evals alone would have shipped this regression; 
 
 ### F7. Prompt changes since stage 1
 - Multi-intent: instructions now ask for parallel searches and one `show_products` call per intent. Result: two parallel searches and two titled groups (was sequential searches and one group).
-- Ambiguous requests: current default is "a small spread of well-rated, affordable picks from two or three categories as separate groups, then one narrowing question". **Open — this is a product decision.**
+- Ambiguous requests: "a small spread of well-rated, affordable picks from two or three categories as separate groups, then one narrowing question". Confirmed as D7.
 
 ## Stage 3 findings (2026-11-24)
 
@@ -219,14 +219,14 @@ Failures, each seen once in three runs of its case:
 
 Not a single run produced an ungrounded price in text, a card that differs from the catalog, cards for an off-catalog request, or a product named while the catalog was down.
 
-- **Effort: these runs do not separate `none` from `low`.** 75/75 vs 73/75 with one of the two failures being a check bug; `none` was slower here and faster in stage 1. With this sample size both differences are noise. **Open:** final effort level. No evidence to move off `low`.
+- **Effort: these runs do not separate `none` from `low`.** 75/75 vs 73/75 with one of the two failures being a check bug; `none` was slower here and faster in stage 1. With this sample size both differences are noise. **Decided: stay on `low`.** Nothing here justifies a change, and `low` leaves the model room to reason on turns that need it.
 
 ### F15. The relevance judge needed a second version before it measured anything
 Judge: Decisions API, one Boolean question per shown card, answer is P(relevant) (`evals/judge.ts`). Reported as a warning, never as a gate.
 - **V1 scored each card against the whole request.** A laptop shown for "a laptop, a men's watch and sunglasses" got 0.34–0.49; a perfume shown for "exactly two fragrances" got 0.03; the top-rated skin-care product got 0.38 for "which has the best rating". 41 of 247 cards fell below 0.5 while the oracle checks passed.
 - **V2** tells the judge it is looking at one card of several, that matching one of several requested things is enough, and that constraints on the set (count, cheapest, best) are not its job. On the 32 calibration pairs V1 called 11 relevant and V2 calls 21; pairs the judge is unsure about (0.2–0.8) dropped from 17 to 9.
 - **V2 is still questionable** in places I would not sign off on myself: "matching shoes" for a dress score 0.06–0.30, and an Apple HomePod scores 0.23 for "What do you have from Apple?".
-- **Open — calibration.** `evals/calibration/pairs.json` has 32 request–product pairs with `"relevant": null`. Once they are labelled by hand, `npm run eval:calibrate` reports agreement and lists every disagreement. Until then the judge's numbers are unvalidated and must not be quoted as quality.
+- Calibration against hand labels: see F16.
 - The judge is the same model family as the system it judges. Agreement with human labels is the only thing that makes it evidence.
 
 ### F16. Judge calibration against human labels

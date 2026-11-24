@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Shopping Copilot
 
-## Getting Started
+A chat assistant that finds products in the [DummyJSON](https://dummyjson.com/docs/products) catalog and shows them as cards inside the conversation. Take-home assignment.
 
-First, run the development server:
+## Setup and run
+
+Requires **Node.js 22 or newer**.
 
 ```bash
+npm ci
+cp .env.example .env.local   # then put your OpenAI key in .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Without an API key:** `MOCK_LLM=1 npm run dev` starts the app with a scripted stand-in for the model. It answers queries that name a category ("show me laptops", "any smartphones?") and exercises the whole UI and storage path. It says nothing about answer quality.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Conversations are stored in `data/copilot.db` (SQLite, created on first use). Delete the `data/` folder to start clean.
 
-## Learn More
+### Configuration
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | — | Required unless `MOCK_LLM=1` |
+| `OPENAI_MODEL` | `gpt-6-luna` | Model id |
+| `CATALOG_BASE_URL` | `https://dummyjson.com` | Catalog API |
+| `DATABASE_PATH` | `data/copilot.db` | SQLite file |
+| `MOCK_LLM` | — | `1` replaces the model with a scripted one |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Commands
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Command | What it runs | Needs |
+|---|---|---|
+| `npm test` | Unit, integration and component tests (67) | nothing |
+| `npm run e2e` | Two browser scenarios against a real server | `npx playwright install chromium` once |
+| `npm run test:contract` | Checks the live DummyJSON API against the code's assumptions | network |
+| `npm run check` | Types, lint and the three above | network, Playwright browser |
+| `npm run eval` | 25 golden queries against the real model | API key |
+| `npm run eval -- --repeat 3 --judge` | Same, three runs each, with the relevance judge | API key |
+| `npm run eval:calibrate` | Relevance judge vs. hand labels | API key |
+| `npm run mutate` | Applies deliberate defects and reports which suite notices | Playwright browser |
+| `npm run trace -- "phones under 300"` | One query, printed step by step | API key |
 
-## Deploy on Vercel
+### Where things are
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+src/lib/catalog/     DummyJSON client, search (API candidates + local refine), fixture emulation
+src/lib/agent/       tools, instructions, the agent turn, the chat request handler, scripted model
+src/lib/db/          SQLite store
+src/app/             /api/chat, /api/conversations, /c/[id]
+src/components/      chat, message parts, product cards, sidebar
+tests/               unit, integration, components, contract
+e2e/                 Playwright scenarios and the catalog stub
+evals/               golden cases, checks, judge, calibration, pinned catalog snapshot
+DECISIONS.md         decision log: what was chosen, rejected, tried and dropped, with numbers
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Architecture and framework choice
+
+_To be written._
+
+## Retrieval strategy
+
+_To be written._
+
+## Conversation and state
+
+_To be written._
+
+## Evaluation
+
+_To be written._
+
+## Known limitations
+
+_To be written._
