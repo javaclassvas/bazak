@@ -53,12 +53,47 @@ Numbers are from single runs unless stated otherwise — treat them as indicativ
 - Off-catalog ("a flight to Tokyo") was handled with no tool call at every level.
 - All levels chose `category` over free-text `query` when a category fit.
 - **Multi-intent:** at `none`/`low` the two searches ran in separate steps (4 steps); at `medium` they ran in parallel (3 steps). At every level both intents ended up in a single `show_products` group. Both are prompt issues to address in stage 2.
-- **Open:** effort level. Final choice should come from eval pass rate vs latency in stage 6; this table only sets the starting point.
+- **Decided (starting point):** `low`. Same latency as `none` within noise, and it leaves the model room to reason when a turn needs it. Final level is re-checked against eval pass rate in stage 6.
 
 ### F3. Replaying stored history
 A second turn that rebuilds the conversation from JSON (as the database will) works with tool parts, and with reasoning parts both kept and stripped (tested at `high`, where reasoning parts are reliably produced). The Responses API did not reject replayed reasoning parts.
-- **Open:** keep or strip reasoning parts before saving. Keeping them is not required for correctness; stripping keeps stored history and replayed input smaller.
+- **Decided:** do not keep them. Reasoning summaries are switched off at the provider (`reasoningSummary: null`); we neither show nor store them.
 
 ### F4. Things the traces surfaced
 - "laptops under 1000" correctly returns nothing: the cheapest laptop in the catalog costs more. The assistant echoed the user's budget ("under $1,000") in its text. The planned eval invariant "every money amount in the text equals a shown product's price" must therefore allow amounts taken from the user's own message.
 - The model asked to show "the second one again" re-used an id from the earlier turn's search results, which is the case the `show_products` allowlist has to permit (ids seen anywhere in this conversation, not only in the current turn).
+
+## Stage 2 findings (2026-11-24)
+
+### D5. Search is one path: API for candidates, then a pure `refine`
+`fetchCandidates` picks one endpoint (`/products/category/{slug}`, `/products/search?q=`, or `/products`), always with `limit=0&select=…`. `refine` then applies price range, sort and slice locally.
+- The API's own `sortBy`, `order`, `limit`, `skip` are deliberately unused: its `limit` would cut the list before our price filter runs.
+- Category + text query is intersected locally with a single API call, because the API cannot combine them.
+- A multi-word phrase that matches nothing is retried word by word (stopwords removed, at most 4 words, in parallel) and ranked by number of words matched. The model is told the match was partial.
+- Categories are a committed constant, not fetched at runtime. The live-API contract test (stage 5) is what catches drift.
+
+### D6. `show_products` allowlist
+Only ids returned by a search in this conversation can be shown: the current request's results plus ids found in stored tool outputs of earlier turns. Ids from earlier turns are hydrated with `GET /products/{id}`. Unknown ids are dropped and reported back to the model. At most 8 cards, duplicates removed. A `reason` containing a price or percentage is discarded.
+- The model receives only `{ shown, dropped }` for this tool (`toModelOutput`); the full cards go to the UI and the database.
+
+### F5. Golden queries, first results
+`npm run eval`: real model, real agent code, pinned catalog (`evals/fixture/catalog.json`, 194 products captured 2026-11-24). Ten cases; each has an oracle predicate over the fixture, and the checks are set relations: shown ⊆ oracle, and shown ≥ min(3, |oracle|). Assertions read the stored assistant message, i.e. what the UI would render.
+
+| Run | Result |
+|---|---|
+| 1 × each | 10/10 |
+| 3 × each | 30/30 on gating checks; the allowlist fired once |
+
+- **The allowlist caught a real hallucinated id.** In one of three runs of "phones under $300" the model asked to show id 126, which the search had not returned. The server dropped it; the four cards shown were correct. `no dropped ids` is therefore a *warning*, not a gate: the guard is the product behaviour, and how often it fires is a metric.
+- **Open:** whether a dropped id should stay a warning or fail the case.
+
+### F6. First mutation: removing the price filter
+Deleting the `maxPrice` filter from `refine`:
+- **Unit tests: caught** (2 failures).
+- **Live evals: NOT caught.** Both budget cases still passed, because the model sees candidate prices and filters them itself.
+
+The model masks retrieval bugs. Evals alone would have shipped this regression; deterministic tests are what guard the retrieval layer. This goes into the README's "what slips through".
+
+### F7. Prompt changes since stage 1
+- Multi-intent: instructions now ask for parallel searches and one `show_products` call per intent. Result: two parallel searches and two titled groups (was sequential searches and one group).
+- Ambiguous requests: current default is "a small spread of well-rated, affordable picks from two or three categories as separate groups, then one narrowing question". **Open — this is a product decision.**
