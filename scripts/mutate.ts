@@ -124,6 +124,12 @@ function failures(output: string): string[] {
   return [...new Set([...vitest, ...playwright, ...evals])];
 }
 
+let pendingRestore: (() => void) | undefined;
+process.on('SIGINT', () => {
+  pendingRestore?.();
+  process.exit(130);
+});
+
 function main() {
   if (execSync('git status --porcelain src', { encoding: 'utf8' }).trim()) {
     console.error('src/ has uncommitted changes. Commit or stash them first: this script rewrites source files.');
@@ -140,10 +146,7 @@ function main() {
       process.exit(1);
     }
     const restore = () => writeFileSync(m.file, original);
-    process.once('SIGINT', () => {
-      restore();
-      process.exit(130);
-    });
+    pendingRestore = restore;
 
     console.log(`\n▶ ${m.id}: ${m.what}`);
     const by: string[] = [];
@@ -162,6 +165,7 @@ function main() {
       rows.push({ id: m.id, what: m.what, types, fast, e2e, evals, by });
     } finally {
       restore();
+      pendingRestore = undefined;
     }
   }
 
