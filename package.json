@@ -10,7 +10,9 @@
     "trace": "tsx scripts/trace.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "eval": "tsx evals/run.ts"
+    "eval": "tsx evals/run.ts",
+    "test:contract": "CONTRACT=1 vitest run",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.122",
@@ -23,13 +25,17 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "^4.0.39",
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/turbopack": "4.3.3",
+    "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "jsdom": "^31.0.1",
     "tailwindcss": "4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^5",

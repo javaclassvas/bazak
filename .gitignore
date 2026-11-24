@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-e2e/
 /out/
 
 # production
@@ -44,3 +45,5 @@ next-env.d.ts
 # local SQLite database and eval output
 /data/
 /evals/out/
+/test-results/
+/playwright-report/

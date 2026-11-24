@@ -159,3 +159,40 @@ The SDK guide's pattern for surviving a closed tab is `result.consumeStream()`. 
 
 ### F11. Next.js 16 keeps the previous route mounted but hidden
 After client-side navigation the previous conversation's DOM is still present, hidden. It is not a visual defect, but selectors in e2e tests must target visible elements, and a conversation revisited without a reload shows its in-memory state. The `lastMessageId` check is what catches that state being stale.
+
+## Stage 5 findings (2026-11-24)
+
+### D11. History shows a snapshot of the cards
+Decided: a stored conversation shows the cards as they were when shown, not re-read from the catalog.
+- **Why:** a conversation is a record of what the user saw; it opens without calling the catalog; a product that has since disappeared needs no special case.
+- **Rejected — re-hydrate on open:** fresher prices, but history stops being a record, opening a chat depends on the catalog being up, and removed products need their own UI.
+- **Consequence:** a price in an old conversation can be stale. Freshness belongs at the moment of purchase, which this app does not have.
+
+### D12. Test layers and what each one owns
+| Layer | Command | Replaced | Owns |
+|---|---|---|---|
+| Unit (38) | `npm test` | catalog → fixture | endpoint routing, price/sort/limit, word fallback, allowlist, reason filter, SQLite store, corrupt file and row |
+| Integration (21) | `npm test` | model → scripted, catalog → fixture | the whole server path: request checks, persistence, tool loop, stream, failures |
+| Components (7) | `npm test` | — (jsdom) | a tool output becomes the right DOM: fields, missing data, broken image, skeleton, order of parts |
+| E2E (2) | `npm run e2e` | model → `MOCK_LLM=1`, catalog → local stub | a real browser on the real server and real SQLite: send, cards, reload, new chat, list, resume, stale tab |
+| Contract (13) | `npm run test:contract` | nothing | the live API still behaves as the code and the fixture assume |
+| Evals (10 cases) | `npm run eval` | catalog → fixture | the real model's behaviour |
+
+`npm test` needs neither network nor key and runs in about a second.
+
+- The integration model is scripted to misbehave: shows ids it never searched, sends duplicates and 30 ids, searches forever, passes arguments that break the schema. The point of these tests is that the server holds its guarantees whatever the model does.
+- The contract test compares the emulated API with the live one query by query. Without it, every test that runs on the fixture would only prove agreement with our own emulation.
+- **The seam that no test crosses:** the real model and the real browser never meet in one run. Evals assert on the stored assistant message; e2e renders stored messages from a scripted model. What joins them is one shared schema for the `show_products` output.
+
+### F12. Mutations run so far
+| Change | Caught by |
+|---|---|
+| Price filter removed from `refine` | unit (2 failures). **Not** by live evals: the model filters by itself |
+| Server-side stream drain removed | integration (1 failure) |
+| `lastMessageId` check removed | integration (1 failure) |
+
+### F13. Things the tests surfaced
+- **Test isolation:** the in-flight lock is process-wide. One test leaving a reply unfinished made the next one pass for the wrong reason (it got `busy` instead of reaching the code under test). Fixed by waiting for the lock after every test.
+- **`busy` is reachable by a real user:** in the two-tab e2e scenario the cards appear before the reply ends, and sending from the other tab at that moment answers 409 `busy`. The chat shows "A reply is still being generated" with Retry.
+- Both disk-full paths are now covered by integration tests (user message → 507 and no model call; assistant message → reply still streams, loss is logged).
+- `MOCK_LLM=1` also serves as a way to click through the app without an API key.
