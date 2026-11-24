@@ -78,6 +78,13 @@ describe('show_products allowlist', () => {
 });
 
 describe('search_products', () => {
+  it('only accepts categories that exist in the catalog', () => {
+    const schema = setup().tools.search_products.inputSchema as unknown as { safeParse: (v: unknown) => { success: boolean } };
+    expect(schema.safeParse({ category: 'laptops' }).success).toBe(true);
+    // A made-up slug would return an empty list from the API (HTTP 200), which looks like "nothing in stock".
+    expect(schema.safeParse({ category: 'flights' }).success).toBe(false);
+  });
+
   it('adds returned ids to the allowlist and returns compact candidates', async () => {
     const { search, state } = setup();
     const out = (await search({ category: 'tablets' })) as { ok: true; products: { id: number }[]; total: number };
