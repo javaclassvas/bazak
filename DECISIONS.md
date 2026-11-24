@@ -228,3 +228,42 @@ Judge: Decisions API, one Boolean question per shown card, answer is P(relevant)
 - **V2 is still questionable** in places I would not sign off on myself: "matching shoes" for a dress score 0.06–0.30, and an Apple HomePod scores 0.23 for "What do you have from Apple?".
 - **Open — calibration.** `evals/calibration/pairs.json` has 32 request–product pairs with `"relevant": null`. Once they are labelled by hand, `npm run eval:calibrate` reports agreement and lists every disagreement. Until then the judge's numbers are unvalidated and must not be quoted as quality.
 - The judge is the same model family as the system it judges. Agreement with human labels is the only thing that makes it evidence.
+
+### F16. Judge calibration against human labels
+32 request–product pairs labelled by hand (27 relevant, 5 not), without sight of the judge's answers. `npm run eval:calibrate`.
+
+| Judge | Agreement | Says "not relevant", human disagrees | Says "relevant", human disagrees |
+|---|---|---|---|
+| V1 | 50% (16/32) | 16 | 0 |
+| V2 | 81% (26/32) | 6 | 0 |
+
+- The judge rejected all five pairs the human rejected (over-budget phone, charger for a phone request, sunglasses outside the price range, the fruit for a lipstick request, a tablet for a laptop request).
+- All six V2 errors are under-scoring. Three are shoes for "a dress and matching shoes" (0.06, 0.07, 0.30): a consistent blind spot on the second half of a compound request. The other three sit near the threshold or are arguable (0.45, 0.44, 0.23).
+- **Decided: the judge stays a warning, not a gate.** It is wrong one time in five.
+- **Not done on purpose: a V3 tuned on these pairs.** Fixing the instructions against the same 32 pairs and then measuring on them would be fitting to the test set. A V3 needs fresh labels.
+- One of the "deliberately wrong" pairs I wrote (AirPods for "wireless earphones") was labelled relevant, correctly. The judge agreed with the human, not with me.
+- Limits: 32 pairs, one labeller, only 5 negatives.
+
+## Stage 7 findings (2026-11-24)
+
+### F17. Mutation table
+`npm run mutate -- --evals`: one deliberate defect at a time, every suite run against it. Evals were run once per mutation, so a "missed" in that column is one sample of a non-deterministic check.
+
+| Defect | Fast suite | E2E | Live evals |
+|---|---|---|---|
+| `show_products` accepts any id (allowlist removed) | **caught** | missed | missed |
+| `maxPrice` ignored | **caught** | missed | missed |
+| `category` is a free string, not an enum | **caught** (after a test was added) | missed | missed |
+| Card price rounded instead of copied | **caught** | **caught** | **caught** |
+| Prompt no longer forbids prices in text | missed | missed | **caught** (`ambiguous`, `injection-price-in-text`) |
+| Prompt has no off-catalog rule | missed | missed | **caught** (`budget-miss`, `off-catalog`, `off-catalog-plausible`) |
+| Reply buffered, not streamed | **caught** | missed | n/a |
+| Server stops reading on disconnect | **caught** | missed | n/a |
+| `lastMessageId` not checked | **caught** | **caught** | n/a |
+| Server accepts assistant messages from the browser | **caught** | missed | n/a |
+
+What the table says:
+- **Guards are tested by deterministic tests, behaviour by evals, and neither covers for the other.** Evals missed the removed allowlist and the removed price filter: a well-behaved model does not exercise a guard, so removing it changes nothing you can observe. Unit and integration tests cannot see a prompt change at all.
+- **E2E catches little that the fast suite does not.** With a scripted model it proves wiring (browser ↔ server ↔ database), not logic. It earns its place on the reload/list/resume path, which nothing else runs in a browser.
+- **The category enum had no test.** The mutation survived every suite; a made-up slug gets HTTP 200 and an empty list from the API, which reads as "nothing in stock". A unit test now pins the schema.
+- **`n/a` is a real gap, not a formality:** evals call the agent directly, so nothing about HTTP, streaming to a browser, or persistence is exercised with the real model.
