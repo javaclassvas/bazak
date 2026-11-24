@@ -97,3 +97,25 @@ The model masks retrieval bugs. Evals alone would have shipped this regression; 
 ### F7. Prompt changes since stage 1
 - Multi-intent: instructions now ask for parallel searches and one `show_products` call per intent. Result: two parallel searches and two titled groups (was sequential searches and one group).
 - Ambiguous requests: current default is "a small spread of well-rated, affordable picks from two or three categories as separate groups, then one narrowing question". **Open — this is a product decision.**
+
+## Stage 3 findings (2026-11-24)
+
+### D7. Ambiguous requests: show, then ask
+Decided: for a vague request the assistant shows a small spread of well-rated, affordable picks from two or three categories as separate groups, then asks one narrowing question.
+- **Rejected — ask first, show nothing:** more precise from the second turn on, but the first answer is empty. In shopping an empty answer costs more than an imperfect one.
+- Guarded by the `ambiguous` golden case: cards within a price cap, at least two groups, and a question in the text.
+
+### D8. How a message is rendered
+An assistant message is rendered part by part, in the order the parts streamed:
+- `tool-search_products` → one quiet status line ("Searching smartphones under $300…" → "Searched … · 9 found"). Searches are not results; the line only explains the wait.
+- `tool-show_products` → skeleton cards while the call runs, then a titled grid. The skeleton count comes from the number of ids the model asked for.
+- text → plain paragraph.
+
+So the order on screen is status → cards → text, and cards appear as soon as `show_products` returns, before the model writes its sentence.
+- Card fields: thumbnail, brand (when present), title, two-line description, the model's reason, price, rating, and a stock badge only when the item is not "In Stock".
+- **Not shown — discount.** The catalog has `discountPercentage`, but the API does not say whether `price` is before or after it. Showing a crossed-out price would be a claim we cannot back.
+- Stream errors reach the browser as a fixed sentence; details go to the server log. The chat shows a Retry button.
+
+### F8. Browser check
+Run by hand against the live API on the dev server: "Phones under $300" (one group, six cards, all images loaded), "a flight to Tokyo" (no tool calls, no cards), "a dress and matching shoes" (two parallel searches, two titled groups). No console errors.
+- **Interim:** this stage has no persistence. The browser still sends the whole history; stage 4 moves the source of truth to the server.
