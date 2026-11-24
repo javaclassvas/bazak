@@ -119,3 +119,43 @@ So the order on screen is status → cards → text, and cards appear as soon as
 ### F8. Browser check
 Run by hand against the live API on the dev server: "Phones under $300" (one group, six cards, all images loaded), "a flight to Tokyo" (no tool calls, no cards), "a dress and matching shoes" (two parallel searches, two titled groups). No console errors.
 - **Interim:** this stage has no persistence. The browser still sends the whole history; stage 4 moves the source of truth to the server.
+
+## Stage 4 findings (2026-11-24)
+
+### D9. Storage layout
+SQLite via `better-sqlite3`, no ORM. Two tables: `conversations(id, title, created_at, updated_at)` and `messages(conversation_id, id, role, parts JSON, seq, created_at)`. A message is stored as its `UIMessage` parts, i.e. exactly what the UI renders.
+- **Rejected — an ORM (Prisma, Drizzle):** two tables and five statements do not justify a schema toolchain.
+- **Rejected — `node:sqlite`:** no native dependency, but still experimental on Node 22.
+- The conversation row is created in the same transaction as its first message, so opening "New chat" and leaving writes nothing.
+- Saving a message is an upsert on `(conversation_id, id)`: a retried request or a late save cannot duplicate it.
+- Title = first user message, collapsed to one line and cut to 60 characters. No extra model call.
+
+### D10. The server owns the history
+The browser sends `{ id, message, lastMessageId }`: one new user message and the id of the message it believes precedes it. The server loads history from SQLite and never accepts history from the client.
+- Only `role: "user"` text messages are accepted. A request carrying an assistant message or tool output is rejected with 400, so a client cannot inject a fake tool result.
+- `lastMessageId` must equal the last stored message id, otherwise **409 `out_of_sync`** and nothing is written. This one check covers: the database was cleared mid-conversation, the conversation continued in another tab, and history rows were lost. The UI offers "Reload conversation" or "Start a new chat with this message".
+- The user message is saved **before** the model is called. If that write fails (disk full, read-only file) the answer is **507 `storage_failed`** and the model is not called.
+- A retry re-sends a user message that is already the last stored one; the server recognises it by id and does not insert it twice. After a reload, a conversation ending in a user message shows "This message did not get a reply" with Retry.
+- One reply per conversation at a time, tracked in process memory: a second request gets **409 `busy`**.
+
+### F9. A disconnect stored a truncated reply — found by testing, fixed
+The SDK guide's pattern for surviving a closed tab is `result.consumeStream()`. Tested by cutting a request after 1.5 s:
+- **With `consumeStream()` only:** the stored reply was cut off after the search step, and our no-text fallback sentence was appended to it. The disconnect ended the UI stream early and `onEnd` saved what existed at that moment.
+- **Fix:** the UI stream is split with `tee()`. One branch goes to the browser, the other is drained on the server. Cancelling the browser branch no longer ends the stream.
+- **After the fix, same test:** the full reply (search, three cards, text) was in the database about 4 s after the disconnect; meanwhile the page showed "Finishing the previous reply…" and a second request got 409 `busy`.
+- Not done: resumable streams. A reload mid-reply shows a waiting state and reloads until the reply is saved; it does not re-attach to the live stream.
+
+### F10. Failure behaviour, as built
+| Situation | Behaviour | Verified by |
+|---|---|---|
+| Browser storage cleared | Nothing lost; state is on the server, id in the URL | by design |
+| Database cleared, or conversation continued elsewhere | 409 `out_of_sync`, nothing written | manual request |
+| Forged assistant message / malformed body | 400, nothing written | manual request |
+| Database file unreadable at startup | Renamed to `*.corrupt-<time>`, fresh database, notice in the sidebar | unit test |
+| One message row with unreadable JSON | Row skipped, the rest loads, notice in the chat | unit test |
+| Tab closed mid-reply | Reply completes and is saved | manual test (F9) |
+| Disk full on the user message | 507, model not called | **not yet tested** |
+| Disk full on the assistant message | Logged; the reply was seen but is missing after reload | **not yet tested** |
+
+### F11. Next.js 16 keeps the previous route mounted but hidden
+After client-side navigation the previous conversation's DOM is still present, hidden. It is not a visual defect, but selectors in e2e tests must target visible elements, and a conversation revisited without a reload shows its in-memory state. The `lastMessageId` check is what catches that state being stale.
