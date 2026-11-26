@@ -267,3 +267,16 @@ What the table says:
 - **E2E catches little that the fast suite does not.** With a scripted model it proves wiring (browser ↔ server ↔ database), not logic. It earns its place on the reload/list/resume path, which nothing else runs in a browser.
 - **The category enum had no test.** The mutation survived every suite; a made-up slug gets HTTP 200 and an empty list from the API, which reads as "nothing in stock". A unit test now pins the schema.
 - **`n/a` is a real gap, not a formality:** evals call the agent directly, so nothing about HTTP, streaming to a browser, or persistence is exercised with the real model.
+
+### F18. The seam is closed by hand: a real-model browser run
+`npm run e2e:live` (`e2e/live/real-model.spec.ts`): real browser, real server and SQLite, real model, live catalog API. Nothing replaced. Three scenarios:
+- **Budget query** — cards appear while the reply is still streaming; every card's title and price equals what the live API returns for that product id right now; every price is within the stated budget; any price written in prose is a shown price or the user's own number; after a reload the same cards come back from the database; a refinement in the same conversation produces a second grounded group.
+- **Off-catalog query** — a reply and no cards.
+- **Two things at once** — at least two groups, and the cards cover exactly the two expected categories.
+
+Assertions are properties that must hold for any acceptable answer; none of them names a product the model is expected to pick.
+- 5 runs, 15/15 scenarios passed, about 30 s per run.
+- Teeth: with card prices rounded on purpose, both scenarios that show cards failed on "price of #…".
+- **Not in the gate**, for the same reasons as evals: it spends API calls and is not deterministic. It is a pre-submission check.
+- Cards now carry `data-product-id`, which is what lets a browser test compare a card with the catalog.
+- What it still does not cover: only three scenarios, one browser, English only, and it trusts the live API as the source of truth at the moment of the run.

@@ -22,7 +22,7 @@ function Thumbnail({ src, alt }: { src: string | null; alt: string }) {
 export function ProductCard({ product }: { product: Card }) {
   const lowStock = product.availability && product.availability !== 'In Stock';
   return (
-    <article data-testid="product-card" className="flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white">
+    <article data-testid="product-card" data-product-id={product.id} className="flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white">
       <div className="aspect-square bg-zinc-50 p-3">
         <Thumbnail src={product.thumbnail} alt={product.title} />
       </div>

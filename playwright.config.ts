@@ -11,6 +11,7 @@ const STUB_PORT = 4010;
 export default defineConfig({
   testDir: 'e2e',
   testMatch: '*.spec.ts',
+  testIgnore: '**/live/**', // the real-model run has its own config
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
