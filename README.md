@@ -36,6 +36,7 @@ Conversations are stored in `data/copilot.db` (SQLite, created on first use). De
 | `npm run e2e` | Two browser scenarios against a real server | `npx playwright install chromium` once |
 | `npm run test:contract` | Checks the live DummyJSON API against the code's assumptions | network |
 | `npm run check` | Types, lint and the three above | network, Playwright browser |
+| `npm run e2e:live` | Three browser scenarios with the real model and the live catalog | API key, Playwright browser |
 | `npm run eval` | 25 golden queries against the real model | API key |
 | `npm run eval -- --repeat 3 --judge` | Same, three runs each, with the relevance judge | API key |
 | `npm run eval:calibrate` | Relevance judge vs. hand labels | API key |
@@ -55,6 +56,20 @@ e2e/                 Playwright scenarios and the catalog stub
 evals/               golden cases, checks, judge, calibration, pinned catalog snapshot
 DECISIONS.md         decision log: what was chosen, rejected, tried and dropped, with numbers
 ```
+
+## Latest verification run
+
+Run on **2026-11-26** at commit `8393ce8`, model `gpt-6-luna`, reasoning effort `low`.
+
+| Command | Result |
+|---|---|
+| `npm run check` | 67 fast tests, 2 e2e scenarios and 13 live-API contract checks passed; types and lint clean |
+| `npm run eval -- --repeat 3 --judge` | 75 of 75 runs passed (25 cases × 3). Median 3.0 s to the first cards, 4.1 s to the end of the reply |
+| `npm run e2e:live` | 3 of 3 scenarios passed |
+
+The relevance judge scored 244 shown cards: mean P(relevant) 0.85, 22 cards below 0.5. The judge is a warning, not a gate: on 32 hand-labelled pairs it agrees with the human 81% of the time, and every one of its errors is an under-score. Of the 22 flagged cards, 13 come from "a dress and matching shoes" and 6 from "What do you have from Apple?" — the two requests where calibration showed the judge under-scoring; all 22 passed the oracle checks.
+
+Evals and the live browser run call a real model, so repeating them will not reproduce these numbers exactly. Earlier runs during development were 74/75, 73/75 and 75/75; the failures and what was done about each are in `DECISIONS.md` (F14).
 
 ## Architecture and framework choice
 

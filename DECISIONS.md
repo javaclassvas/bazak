@@ -280,3 +280,10 @@ Assertions are properties that must hold for any acceptable answer; none of them
 - **Not in the gate**, for the same reasons as evals: it spends API calls and is not deterministic. It is a pre-submission check.
 - Cards now carry `data-product-id`, which is what lets a browser test compare a card with the catalog.
 - What it still does not cover: only three scenarios, one browser, English only, and it trusts the live API as the source of truth at the moment of the run.
+
+### F19. Verification run for submission (2026-11-26, commit `8393ce8`)
+- `npm run check`: 67 fast tests, 2 e2e scenarios, 13 contract checks, types and lint — all passed.
+- `npm run eval -- --repeat 3 --judge`: 75/75 runs. Median 2950 ms to cards, 4133 ms total.
+- `npm run e2e:live`: 3/3.
+- Judge: 244 cards, mean P(relevant) 0.852, 22 below 0.5 — 13 in `multi-intent` ("a dress and matching shoes"), 6 in `direct-brand` ("What do you have from Apple?"), 2 in `multi-turn-refine`, 1 in `mixed-on-off`. All 22 passed the oracle checks. These are the same requests where calibration (F16) showed the judge under-scoring, so the warnings say more about the judge than about the answers.
+- One run of each; the eval and live numbers will vary on repetition.
