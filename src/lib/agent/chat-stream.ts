@@ -1,9 +1,11 @@
 import {
   createIdGenerator,
   createUIMessageStreamResponse,
+  readUIMessageStream,
   toUIMessageStream,
   TypeValidationError,
   type LanguageModel,
+  type UIMessageChunk,
 } from 'ai';
 import { z } from 'zod';
 import type { CatalogClient } from '../catalog/client';
@@ -39,9 +41,46 @@ export type ChatErrorCode =
 
 const fail = (status: number, code: ChatErrorCode, message: string) => Response.json({ error: code, message }, { status });
 
-const FALLBACK_TEXT = 'I ran out of steps before finishing that. Could you rephrase or narrow it down?';
+/** Closing sentence when the model called tools but wrote nothing, so a reply never ends in silence. */
+export const CLOSING_TEXT = {
+  /** Cards were shown; the model just did not add a sentence. */
+  shown: 'Here is what I found.',
+  /** The step limit was reached, or the model stopped, before anything could be shown. */
+  nothingShown: 'I could not finish that search. Could you rephrase it or narrow it down?',
+};
 const RUN_LOCK_MS = 120_000;
 const newMessageId = createIdGenerator({ prefix: 'msg', size: 16 });
+
+/**
+ * If a reply used tools but contains no text, append a closing sentence to the stream itself.
+ * Done in the stream, not at save time, so the browser and the database get the same reply.
+ */
+function withClosingText(state: { failed: boolean }): TransformStream<UIMessageChunk, UIMessageChunk> {
+  let usedTools = false;
+  let wroteText = false;
+  let showedCards = false;
+  return new TransformStream({
+    transform(chunk, controller) {
+      if (chunk.type === 'tool-input-available') usedTools = true;
+      if (chunk.type === 'text-delta' && chunk.delta.trim()) wroteText = true;
+      // A stream-level error ends the turn. A failed tool call does not: it is a part of the reply.
+      if (chunk.type === 'error') state.failed = true;
+      if (chunk.type === 'tool-output-available') {
+        const output = chunk.output as { products?: unknown[]; dropped?: unknown } | null;
+        if (output && 'dropped' in output && Array.isArray(output.products) && output.products.length > 0) showedCards = true;
+      }
+      if (chunk.type === 'finish' && usedTools && !wroteText && !state.failed) {
+        const textId = 'closing-text';
+        controller.enqueue({ type: 'start-step' });
+        controller.enqueue({ type: 'text-start', id: textId });
+        controller.enqueue({ type: 'text-delta', id: textId, delta: showedCards ? CLOSING_TEXT.shown : CLOSING_TEXT.nothingShown });
+        controller.enqueue({ type: 'text-end', id: textId });
+        controller.enqueue({ type: 'finish-step' });
+      }
+      controller.enqueue(chunk);
+    },
+  });
+}
 
 // Conversations with a reply in flight, in this process. Stops a second tab or an impatient retry from
 // starting a parallel generation whose answer would be saved twice.
@@ -90,7 +129,7 @@ export async function createChatStream(body: unknown, deps: ChatDeps): Promise<R
   }
 
   activeRuns.add(id);
-  // Safety net: never leave a conversation locked if the stream ends without reaching onEnd.
+  // Safety net: never leave a conversation locked if the stream never ends.
   const unlock = setTimeout(() => activeRuns.delete(id), RUN_LOCK_MS);
   try {
     const { result, messages } = await runAgent({
@@ -100,45 +139,45 @@ export async function createChatStream(body: unknown, deps: ChatDeps): Promise<R
       effort: deps.effort,
     });
 
+    const state = { failed: false };
     const uiStream = toUIMessageStream({
       stream: result.stream,
       originalMessages: messages,
       generateMessageId: newMessageId,
+      // Called for tool errors as well as fatal ones, so it only words the message; it decides nothing.
       onError: (error) => {
         console.error('[chat] stream error:', error);
         return 'The assistant could not finish this reply. Please try again.';
       },
-      onEnd: ({ responseMessage }) => {
-        clearTimeout(unlock);
-        activeRuns.delete(id);
-        // Reasoning is neither shown nor replayed, so it is not stored.
-        const parts: unknown[] = responseMessage.parts.filter((p) => p.type !== 'reasoning');
-        const hasContent = parts.some((p) => (p as { type: string }).type !== 'step-start');
-        if (!hasContent) return; // the model failed before producing anything: leave the user message last, so Retry works
-        const hasText = parts.some((p) => (p as { type: string; text?: string }).type === 'text' && (p as { text?: string }).text?.trim());
-        if (!hasText) parts.push({ type: 'text', text: FALLBACK_TEXT });
-        try {
-          deps.store.saveMessage(id, { id: responseMessage.id, role: 'assistant', parts });
-        } catch (error) {
-          // The user has already seen this reply; it will be missing after a reload.
-          console.error('[chat] could not save the assistant message:', error);
-        }
-      },
-    });
+    }).pipeThrough(withClosingText(state));
 
-    // Two readers of one stream: the browser, and a server-side drain. If the browser goes away
-    // (tab closed, page reloaded) its branch is cancelled, but the drain keeps pulling, so the turn runs
-    // to completion and `onEnd` saves the whole reply. Without the drain, a disconnect ends the stream
-    // early and a truncated reply is what gets stored.
-    const [forBrowser, forDrain] = uiStream.tee();
+    // Two readers of one stream: the browser, and a server-side reader that assembles the message to
+    // store. If the browser goes away (tab closed, page reloaded) its branch is cancelled, but the
+    // server-side reader keeps pulling, so the turn runs to completion and the whole reply is saved.
+    // Both branches carry the same chunks, so what is stored is what was streamed.
+    const [forBrowser, forStore] = uiStream.tee();
     void (async () => {
-      const reader = forDrain.getReader();
+      let reply: { id: string; parts: { type: string }[] } | undefined;
       try {
-        while (!(await reader.read()).done);
+        for await (const snapshot of readUIMessageStream({ stream: forStore })) reply = snapshot;
       } catch (error) {
-        console.error('[chat] drain failed:', error);
+        state.failed = true;
+        console.error('[chat] could not read the reply to store it:', error);
+      } finally {
         clearTimeout(unlock);
         activeRuns.delete(id);
+      }
+      // A reply that failed part-way is not stored. The user message stays last in the database, which
+      // is exactly the state Retry expects; a half-finished reply would make every retry look stale.
+      if (state.failed || !reply) return;
+      // Reasoning is neither shown nor replayed, so it is not stored.
+      const parts = reply.parts.filter((p) => p.type !== 'reasoning');
+      if (!parts.some((p) => p.type !== 'step-start')) return; // nothing was produced
+      try {
+        deps.store.saveMessage(id, { id: reply.id, role: 'assistant', parts });
+      } catch (error) {
+        // The user has already seen this reply; it will be missing after a reload.
+        console.error('[chat] could not save the assistant message:', error);
       }
     })();
 

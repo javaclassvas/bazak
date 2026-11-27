@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_STEPS } from '../../src/lib/agent/agent';
-import { createChatStream, isGenerating, type ChatDeps } from '../../src/lib/agent/chat-stream';
+import { CLOSING_TEXT, createChatStream, isGenerating, type ChatDeps } from '../../src/lib/agent/chat-stream';
 import { createScriptedModel, type ScriptContext, type ScriptedStep } from '../../src/lib/agent/mock-model';
 import { MAX_SHOWN } from '../../src/lib/agent/tools';
 import { createCatalogClient } from '../../src/lib/catalog/client';
@@ -149,7 +149,7 @@ describe('a misbehaving model', () => {
     expect(out.products.map((p) => p.id)).toEqual(ids.slice(0, MAX_SHOWN));
   });
 
-  it('is stopped when it searches forever, and the stored reply still has text', async () => {
+  it('is stopped when it searches forever, and both the browser and the database get a closing sentence', async () => {
     const d = deps(() => search({ query: 'zeppelin' }));
     const chunks = await readChunks(await send(d, 'loop', 'u1', null));
     await settled();
@@ -157,7 +157,18 @@ describe('a misbehaving model', () => {
     expect(chunks.some((c) => c.type === 'finish')).toBe(true);
     const assistant = storedParts()[1];
     expect(assistant.parts.filter((p) => p.type === 'tool-search_products')).toHaveLength(MAX_STEPS);
-    expect(assistant.parts.at(-1)).toMatchObject({ type: 'text', text: expect.stringContaining('ran out of steps') });
+    expect(assistant.parts.at(-1)).toMatchObject({ type: 'text', text: CLOSING_TEXT.nothingShown });
+    // The same sentence was streamed, not only stored: the user must not see something new after a reload.
+    expect(chunks.filter((c) => c.type === 'text-delta').map((c) => c.delta).join('')).toBe(CLOSING_TEXT.nothingShown);
+  });
+
+  it('adds a closing sentence under cards when the model shows products and says nothing', async () => {
+    let call = 0;
+    const d = deps(() => [search({ category: 'laptops' }), show([laptops[0].id]), { text: '' }][call++] ?? { text: '' });
+    const chunks = await readChunks(await send(d, 'laptops', 'u1', null));
+    await settled();
+    expect(chunks.filter((c) => c.type === 'text-delta').map((c) => c.delta).join('')).toBe(CLOSING_TEXT.shown);
+    expect(storedParts()[1].parts.at(-1)).toMatchObject({ type: 'text', text: CLOSING_TEXT.shown });
   });
 
   it('survives arguments that do not match the tool schema', async () => {
@@ -263,6 +274,27 @@ describe('failures', () => {
     await readChunks(await send(d, 'hi', 'u1', null));
     await settled();
     expect(store.load(CONV).messages.map((m) => m.role)).toEqual(['user', 'assistant']); // not duplicated
+    log.mockRestore();
+  });
+
+  it('stores nothing when the model fails after a tool call, so the same retry still works', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // First attempt: search succeeds, then the provider fails. Second attempt: everything works.
+    const d = deps(steps(search({ category: 'laptops' }), { error: new Error('429 rate limited') }, search({ category: 'laptops' }), show([laptops[0].id]), { text: 'Here it is.' }));
+    const failed = await readChunks(await send(d, 'laptops', 'u1', null));
+    await settled();
+    expect(failed.some((c) => c.type === 'tool-output-available')).toBe(true); // the turn got part-way
+    expect(failed.some((c) => c.type === 'error')).toBe(true);
+    expect(failed.some((c) => c.type === 'text-delta')).toBe(false); // no closing sentence on a failed turn
+    expect(store.load(CONV).messages.map((m) => m.id)).toEqual(['u1']); // the half-finished reply is not stored
+
+    const retry = await send(d, 'laptops', 'u1', null);
+    expect(retry.status).toBe(200);
+    await readChunks(retry);
+    await settled();
+    const stored = storedParts();
+    expect(stored.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(stored[1].parts.at(-1)).toMatchObject({ type: 'text', text: 'Here it is.' });
     log.mockRestore();
   });
 

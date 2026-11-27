@@ -64,17 +64,26 @@ export function Chat({ id, initialMessages, unreadable = 0, pending = false }: P
   }, [messages, status]);
 
   // Pick up a message carried over from an out-of-sync conversation.
+  // The draft is removed only once it has been applied: in development React runs effects twice,
+  // and removing it on the first pass would leave nothing for the second.
   useEffect(() => {
+    if (initialMessages.length > 0) return;
     let draft: string | null = null;
     try {
       draft = sessionStorage.getItem(DRAFT_KEY);
-      sessionStorage.removeItem(DRAFT_KEY);
     } catch {
       /* storage unavailable: nothing to restore */
     }
-    if (!draft || initialMessages.length > 0) return;
+    if (!draft) return;
     const text = draft;
-    const timer = setTimeout(() => setInput(text), 0);
+    const timer = setTimeout(() => {
+      setInput(text);
+      try {
+        sessionStorage.removeItem(DRAFT_KEY);
+      } catch {
+        /* nothing to clean up */
+      }
+    }, 0);
     return () => clearTimeout(timer);
   }, [initialMessages.length]);
 

@@ -3,9 +3,9 @@ import { createCatalogClient, type CatalogClient } from '../../src/lib/catalog/c
 import { createFixtureFetch } from '../../src/lib/catalog/fixture';
 import type { Product } from '../../src/lib/catalog/types';
 
-export const fixtureProducts: Product[] = JSON.parse(
-  readFileSync(new URL('../../evals/fixture/catalog.json', import.meta.url), 'utf8'),
-).products;
+// Resolved from the project root (where the test runner starts), so it also works in the jsdom
+// environment, where `import.meta.url` is not a file URL.
+export const fixtureProducts: Product[] = JSON.parse(readFileSync('evals/fixture/catalog.json', 'utf8')).products;
 
 /** A real client over the pinned catalog, recording every URL it requests. */
 export function fixtureCatalog(): { catalog: CatalogClient; urls: string[] } {

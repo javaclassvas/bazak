@@ -83,8 +83,8 @@ const MUTATIONS: Mutation[] = [
     id: 'no-drain',
     what: 'the server stops reading when the browser disconnects',
     file: 'src/lib/agent/chat-stream.ts',
-    find: 'while (!(await reader.read()).done);',
-    replace: 'await reader.cancel();',
+    find: 'for await (const snapshot of readUIMessageStream({ stream: forStore })) reply = snapshot;',
+    replace: 'await forStore.cancel();',
     evals: false,
   },
   {
