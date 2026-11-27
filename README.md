@@ -59,7 +59,7 @@ DECISIONS.md         decision log: what was chosen, rejected, tried and dropped,
 
 ## Latest verification run
 
-Run on **2026-11-26** at commit `8393ce8`, model `gpt-6-luna`, reasoning effort `low`.
+Run on **2026-11-26** at commit `318685f`, model `gpt-6-luna`, reasoning effort `low`.
 
 | Command | Result |
 |---|---|
@@ -69,7 +69,7 @@ Run on **2026-11-26** at commit `8393ce8`, model `gpt-6-luna`, reasoning effort 
 
 The relevance judge scored 244 shown cards: mean P(relevant) 0.85, 22 cards below 0.5. The judge is a warning, not a gate: on 32 hand-labelled pairs it agrees with the human 81% of the time, and every one of its errors is an under-score. Of the 22 flagged cards, 13 come from "a dress and matching shoes" and 6 from "What do you have from Apple?" — the two requests where calibration showed the judge under-scoring; all 22 passed the oracle checks.
 
-After that run an independent review found four defects (Retry after a mid-turn model failure, a closing sentence that was stored but not streamed, `npm run check` failing on a fresh clone, a lost draft under React Strict Mode). They were fixed with tests, and `npm run check` was re-run on **2026-11-27** at commit `b4cd5c3` on a fresh clone: 75 fast tests, 2 e2e scenarios and 13 contract checks passed. Evals and the live browser run were not repeated after the fixes; the fixes do not touch the agent or its instructions.
+After that run an independent review found four defects (Retry after a mid-turn model failure, a closing sentence that was stored but not streamed, `npm run check` failing on a fresh clone, a lost draft under React Strict Mode). They were fixed with tests, and `npm run check` was re-run on **2026-11-27** at commit `c7a8397` on a fresh clone: 75 fast tests, 2 e2e scenarios and 13 contract checks passed. Evals and the live browser run were not repeated after the fixes; the fixes do not touch the agent or its instructions.
 
 Evals and the live browser run call a real model, so repeating them will not reproduce these numbers exactly. Earlier runs during development were 74/75, 73/75 and 75/75; the failures and what was done about each are in `DECISIONS.md` (F14).
 

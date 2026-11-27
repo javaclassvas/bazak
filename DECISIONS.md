@@ -281,7 +281,7 @@ Assertions are properties that must hold for any acceptable answer; none of them
 - Cards now carry `data-product-id`, which is what lets a browser test compare a card with the catalog.
 - What it still does not cover: only three scenarios, one browser, English only, and it trusts the live API as the source of truth at the moment of the run.
 
-### F19. Verification run for submission (2026-11-26, commit `8393ce8`)
+### F19. Verification run for submission (2026-11-26, commit `318685f`)
 - `npm run check`: 67 fast tests, 2 e2e scenarios, 13 contract checks, types and lint — all passed.
 - `npm run eval -- --repeat 3 --judge`: 75/75 runs. Median 2950 ms to cards, 4133 ms total.
 - `npm run e2e:live`: 3/3.
