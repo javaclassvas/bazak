@@ -17,8 +17,8 @@ import { fixtureCatalog, fixtureProducts } from '../helpers/fixture';
  */
 
 vi.mock('next/link', () => ({
-  default: ({ href, children, prefetch: _prefetch, ...rest }: { href: string; children: React.ReactNode; prefetch?: boolean }) => (
-    <a href={href} {...rest}>
+  default: ({ href, children, onClick }: { href: string; children: React.ReactNode; onClick?: () => void }) => (
+    <a href={href} onClick={onClick}>
       {children}
     </a>
   ),
