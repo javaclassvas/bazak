@@ -16,7 +16,7 @@ Open http://localhost:3000.
 
 **Without an API key:** `MOCK_LLM=1 npm run dev` starts the app with a scripted stand-in for the model. It answers queries that name a category ("show me laptops", "any smartphones?") and exercises the whole UI and storage path. It says nothing about answer quality.
 
-Conversations are stored in `data/copilot.db` (SQLite, created on first use). Delete the `data/` folder to start clean.
+Conversations are stored in `data/copilot.db` (SQLite, created on first use). To start clean, stop the server and then delete the `data/` folder. Deleting it under a running server is not detected: the process keeps writing to the removed file and everything is gone after a restart.
 
 ### Configuration
 
@@ -32,7 +32,7 @@ Conversations are stored in `data/copilot.db` (SQLite, created on first use). De
 
 | Command | What it runs | Needs |
 |---|---|---|
-| `npm test` | Unit, integration and component tests (67) | nothing |
+| `npm test` | Unit, integration and component tests (75) | nothing |
 | `npm run e2e` | Two browser scenarios against a real server | `npx playwright install chromium` once |
 | `npm run test:contract` | Checks the live DummyJSON API against the code's assumptions | network |
 | `npm run check` | Types, lint and the three above | network, Playwright browser |
@@ -68,6 +68,8 @@ Run on **2026-11-26** at commit `8393ce8`, model `gpt-6-luna`, reasoning effort 
 | `npm run e2e:live` | 3 of 3 scenarios passed |
 
 The relevance judge scored 244 shown cards: mean P(relevant) 0.85, 22 cards below 0.5. The judge is a warning, not a gate: on 32 hand-labelled pairs it agrees with the human 81% of the time, and every one of its errors is an under-score. Of the 22 flagged cards, 13 come from "a dress and matching shoes" and 6 from "What do you have from Apple?" — the two requests where calibration showed the judge under-scoring; all 22 passed the oracle checks.
+
+After that run an independent review found four defects (Retry after a mid-turn model failure, a closing sentence that was stored but not streamed, `npm run check` failing on a fresh clone, a lost draft under React Strict Mode). They were fixed with tests, and `npm run check` was re-run on **2026-11-27** at commit `b4cd5c3` on a fresh clone: 75 fast tests, 2 e2e scenarios and 13 contract checks passed. Evals and the live browser run were not repeated after the fixes; the fixes do not touch the agent or its instructions.
 
 Evals and the live browser run call a real model, so repeating them will not reproduce these numbers exactly. Earlier runs during development were 74/75, 73/75 and 75/75; the failures and what was done about each are in `DECISIONS.md` (F14).
 
