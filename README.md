@@ -63,7 +63,7 @@ Run on **2026-11-26** at commit `318685f`, model `gpt-6-luna`, reasoning effort 
 
 | Command | Result |
 |---|---|
-| `npm run check` | 67 fast tests, 2 e2e scenarios and 13 live-API contract checks passed; types and lint clean |
+| `npm run check` | 67 fast tests (the count before the review fixes below; 75 now), 2 e2e scenarios and 13 live-API contract checks passed; types and lint clean |
 | `npm run eval -- --repeat 3 --judge` | 75 of 75 runs passed (25 cases × 3). Median 3.0 s to the first cards, 4.1 s to the end of the reply |
 | `npm run e2e:live` | 3 of 3 scenarios passed |
 
@@ -75,20 +75,83 @@ Evals and the live browser run call a real model, so repeating them will not rep
 
 ## Architecture and framework choice
 
-_To be written._
+TypeScript end to end: Next.js 16 (App Router) with React on the client and the Vercel AI SDK 7 for the model loop. One language and one process serve the UI, the API and the SQLite file, which is all a local single-user app needs.
+
+The SDK provides the stream protocol, the multi-step tool loop and typed tool parts in `useChat`. The parts the assignment is about are my own code: the two tools and the id allowlist, the search module, persistence, the request handler and the chat UI. A whole turn lives in one function (`runAgent`) that takes the model and the catalog as arguments, so the route, the CLI trace, the tests and the evals all run the same code.
+
+Alternatives I rejected:
+
+- **assistant-ui.** It ships a thread list and persistence adapters, which are exactly the parts this assignment asks me to reason about.
+- **FastAPI + React with hand-rolled SSE.** Two runtimes and a hand-written stream protocol, with no gain for a task this size.
+
+The SDK had a cost: its documented way to finish a reply after a disconnect stored a truncated message. A test found it; the stream is now split with `tee()` (DECISIONS F9).
 
 ## Retrieval strategy
 
-_To be written._
+The catalog API is weak: `/products/search` is a case-insensitive substring match on title and description, and there is no price or rating filter. "phone" returns 23 products including AirPods and a selfie stick; "cheap phone" returns nothing.
+
+So retrieval has two steps. The model fills the arguments of `search_products` (text, one of the 24 category slugs, price range, sort, limit). The server then:
+
+1. fetches candidates: `/products/category/{slug}` if a category is given, `/products/search?q=` for text only, `/products` otherwise, always with `limit=0`;
+2. refines them locally in a pure function: price range, sort, slice (10 by default, 20 at most).
+
+The API's own `sortBy`, `order`, `limit` and `skip` are not used: its `limit` would cut the list before the price filter runs. If a multi-word phrase matches nothing, each word is searched separately and the model is told the match was partial.
+
+The model never writes a card. `search_products` returns candidates to the model only; `show_products` takes ids, accepts only ids a search returned in this conversation, and the server builds each card from catalog data. In one of three runs of "phones under $300" the model asked for an id the search had not returned; it was dropped and the four cards shown were correct.
+
+- **Ambiguous** ("something cheap and cool"): show a small spread from two or three categories, then ask one question.
+- **Off-catalog** ("a flight to Tokyo"): say the store does not carry it; no tool calls, no cards.
+- **Multi-intent**: parallel searches, one titled group per thing.
+
+Rejected: loading the whole catalog into memory or into the prompt. Both work at 194 products, but they skip the question of what to query and leave numeric filters to the model.
 
 ## Conversation and state
 
-_To be written._
+Conversations live in a SQLite file on the server, in two tables. A message is stored as the parts the UI renders, so history shows the cards as they were shown. The conversation id is in the URL.
+
+The browser sends one new message and the id of the message it believes came before. The server loads the history itself and accepts only a user text message, so a client cannot forge tool results or prices. I rejected localStorage for that reason, and because quota, corruption and clearing would become my failure modes.
+
+- **Storage full.** The user message is saved before the model is called. If that write fails the server answers 507 and does not call the model. If only the assistant message fails to save, the reply was already shown; it is missing after a reload and Retry is offered.
+- **Corrupted.** An unreadable database file is renamed and a fresh one is created, with a notice. A single bad row is skipped and the rest loads.
+- **Cleared mid-conversation.** If the tables are emptied, the next message's `lastMessageId` no longer matches: 409, nothing is written, and the UI offers a reload or a new chat. The same check catches a second tab. Deleting the `data/` folder under a running server is not detected (see limitations).
+
+A tab closed mid-reply does not stop the turn: the server keeps reading the stream and stores the full reply.
 
 ## Evaluation
 
-_To be written._
+- **75 fast tests** (`npm test`): unit, integration and component tests with a scripted model and a catalog fixture. The scripted model misbehaves on purpose: shows ids it never searched, sends duplicates, searches forever.
+- **2 browser scenarios** (`npm run e2e`) against a real server and real SQLite, with the scripted model.
+- **13 contract checks** against the live catalog API, so I notice if the API stops matching my assumptions.
+- **25 golden queries** (`npm run eval`) against the real model and a pinned catalog snapshot. Each case has an oracle over the catalog, and every turn is checked for invariants: cards equal catalog data, no price in the text that is not a shown price.
+- **3 live browser scenarios** (`npm run e2e:live`) with the real model. Not part of the gate.
+
+To see what each layer catches I planted ten defects and ran every suite against each (`npm run mutate`, DECISIONS F17). Deterministic tests caught the removed guards; the evals did not, because a well-behaved model never exercises a guard. The evals caught the prompt regressions; the deterministic tests cannot see a prompt change. Neither covers for the other.
+
+What slips through:
+
+- The relevance judge is a warning, not a gate. It agrees with my labels on 81% of 32 pairs, which is below the 84% that always answering "relevant" would score, and the figure is in-sample.
+- Evals are 25 cases with one labeller and are not in the gate. Some oracles are soft.
+- A price in the reply text is detected in evals, not prevented at runtime.
+- The live browser run does not prove streaming; one integration test does.
+- No load, latency-regression or accessibility tests.
 
 ## Known limitations
 
-_To be written._
+Today:
+
+- About 3 s to the first cards and 4 s to the end of the reply. Two model steps before any card is the price of the two-tool design.
+- Search quality is bounded by a substring API: no synonyms, no semantic match. Local filtering works only because the catalog is small enough to fetch with `limit=0`.
+- "Those" in a follow-up can resolve to a product the model saw as a candidate but the user never saw as a card.
+- An off-catalog refusal can mention goods the store does not have; nothing checks prose for product claims.
+- A client can overwrite a stored user message by reusing its id. Tool results still cannot be forged.
+- Deleting `data/` under a running server is not detected.
+- Single process, single user, no auth; the one-reply-at-a-time lock is in memory.
+- Prices in old conversations can be stale. A reload mid-reply waits rather than resuming the stream.
+
+With another week:
+
+- More labelled pairs and a judge validated on fresh labels, so it can become a gate.
+- A real search backend behind the same tool contract, measured against the current path.
+- Follow-ups restricted to products that were actually shown.
+- A runtime guard on prices in the reply text.
+- Resumable streams and a lock that survives more than one process.
